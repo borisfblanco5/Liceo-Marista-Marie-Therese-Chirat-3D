@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campus Escolar – Modelo 3D</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --cream: #f5f0e8;
+    --sand:  #e8dfc8;
+    --green: #3a7d44;
+    --green-light: #5aad68;
+    --green-dark:  #2a5c32;
+    --brown: #8b6f47;
+    --wall:  #d4c8a8;
+    --roof:  #c8b890;
+    --shadow: rgba(0,0,0,.18);
+    --accent: #c0392b;
+  }
+
+  body {
+    background: #1a1a2e;
+    font-family: 'Sora', sans-serif;
+    overflow: hidden;
+    color: #fff;
+    user-select: none;
+  }
+
+  #canvas-wrapper {
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+
+  canvas { display: block; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 40px;
+    padding: 8px 24px;
+    font-size: 13px;
+    letter-spacing: .06em;
+    color: rgba(255,255,255,.85);
+    pointer-events: none;
+  }
+
+  #tooltip {
+    position: fixed;
+    background: rgba(20,20,40,.92);
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 13px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s;
+    max-width: 200px;
+    line-height: 1.5;
+  }
+  #tooltip.show { opacity: 1; }
+  #tooltip strong { color: #7ed8a0; display: block; font-size: 14px; margin-bottom: 2px; }
+
+  #controls {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px;
+  }
+  .btn {
+    background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.2);
+    color: #fff; border-radius: 8px;
+    padding: 8px 18px; font-size: 12px;
+    cursor: pointer; font-family: 'Sora', sans-serif;
+    transition: background .2s;
+  }
+  .btn:hover { background: rgba(255,255,255,.22); }
+
+  #legend {
+    position: fixed; right: 18px; top: 50%; transform: translateY(-50%);
+    background: rgba(20,20,40,.85);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 11px;
+    line-height: 2;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  #controls-info {
+    position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
+    background: rgba(20,20,40,.85);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 11px;
+    line-height: 2;
+  }
+  #legend h3 { font-size: 12px; letter-spacing:.1em; color:#7ed8a0; margin-bottom: 6px; text-transform:uppercase; }
+  .leg-row { display:flex; align-items:center; gap:8px; }
+  .leg-dot { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<div id="hud">🏫 Liceo Marista Marie-Thérèse Chirat</div>
+<canvas id="c"></canvas>
+<div id="tooltip"></div>
+
+<div id="controls-info">
+  <h3>Controles</h3>
+  <div class="ctrl-row"><span class="ctrl-icon">🖱️</span><span>Mantén presionado el<br>click izquierdo y mueve<br>el mouse para rotar</span></div>
+  <div class="ctrl-row"><span class="ctrl-icon">⚙️</span><span>Usa el scroll del mouse<br>para acercar o alejar<br>la vista</span></div>
+</div>
+
+<div id="controls">
+  <button class="btn" onclick="resetView()">↺ Reset</button>
+  <button class="btn" onclick="rotateCW()">↻ Rotar</button>
+</div>
+
+<div id="legend">
+  <h3>Guía</h3>
+  <div class="leg-row"><div class="leg-dot" style="background:#d4c8a8"></div>Aulas</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#b8a870"></div>Administración</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#7ec8e3"></div>Biblioteca</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#e8c06a"></div>Lab / Informática</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#e07070"></div>Capilla</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#a0c8f0"></div>Auditorio</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f0b070"></div>Cafetería</div>
+  <div class="leg-row"><div class="leg-dot" style="background:#90d890"></div>Áreas verdes</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+// ── resize ──────────────────────────────────────────────
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', () => { resize(); draw(); });
+
+// ── camera state ─────────────────────────────────────────
+let cam = { rotX: Math.PI/2 * 0.95, rotY: 0, zoom: 0.85, ortho: true };
+let drag = { active: false, sx: 0, sy: 0, rx0: 0, ry0: 0 };
+let autoRotate = false;
+let highlightId = null;
+
+// ── geometry helpers ─────────────────────────────────────
+function project([x, y, z]) {
+  if (cam.ortho) {
+    const s = 1.6 * cam.zoom;
+    const cos = Math.cos(cam.rotY), sin = Math.sin(cam.rotY);
+    const px = (x * cos - z * sin) * s;
+    const py = (-(x * sin + z * cos) * Math.sin(cam.rotX) + y * Math.cos(cam.rotX)) * s;
+    return [canvas.width/2 + px, canvas.height/2 - py];
+  }
+  // perspective
+  const ry = cam.rotY, rx = cam.rotX;
+  const cosY = Math.cos(ry), sinY = Math.sin(ry);
+  const cosX = Math.cos(rx), sinX = Math.sin(rx);
+  const xr = x * cosY - z * sinY;
+  const zr = x * sinY + z * cosY;
+  const yr2 = y * cosX - zr * sinX;
+  const zr2 = y * sinX + zr * cosX;
+  const fov = 700 * cam.zoom;
+  const dist = fov / (fov * 0.004 + zr2 + 6);
+  return [canvas.width/2 + xr * dist, canvas.height/2 - yr2 * dist];
+}
+
+function projectPt(x, y, z) { return project([x, y, z]); }
+
+// draw a flat polygon (ground-level face)
+function poly(pts, fill, stroke, alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  const [px, py] = project(pts[0]);
+  ctx.moveTo(px, py);
+  for (let i=1;i<pts.length;i++) {
+    const [qx, qy] = project(pts[i]);
+    ctx.lineTo(qx, qy);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 0.8; ctx.stroke(); }
+  ctx.restore();
+}
+
+// draw a box (prism): base at y=0, top at y=h
+function box(x0, z0, x1, z1, h, topColor, sideColorW, sideColorE, id) {
+  const hl = cam.highlightId === id;
+
+  const corners = [
+    [x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1],
+    [x0, h, z0], [x1, h, z0], [x1, h, z1], [x0, h, z1],
+  ];
+
+  // south face (z1)
+  poly([corners[3], corners[2], corners[6], corners[7]], sideColorW, '#0003');
+  // east face (x1)
+  poly([corners[2], corners[1], corners[5], corners[6]], sideColorE, '#0003');
+  // north face (z0)
+  poly([corners[0], corners[1], corners[5], corners[4]], sideColorW, '#0003');
+  // west face (x0)
+  poly([corners[3], corners[0], corners[4], corners[7]], sideColorE, '#0003');
+
+  if (hl) {
+    poly([corners[4], corners[5], corners[6], corners[7]], 'rgba(255,255,200,0.28)', null);
+  }
+
+  // ── ROOFS ────────────────────────────────────────────────
+  const width = Math.abs(x1 - x0);
+  const depth = Math.abs(z1 - z0);
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+
+  // Roof colour palette — warm terracotta/slate combos
+  const roofA  = '#b5673a'; // terracotta
+  const roofB  = '#9a4e2a'; // dark terracotta
+  const roofC  = '#7a8c6a'; // sage green
+  const roofD  = '#6a7a5a'; // dark sage
+  const roofSl = '#8a9baa'; // slate blue-grey
+  const roofSd = '#6a7a88'; // dark slate
+  const roofCr = '#c4a060'; // cream/sand
+  const roofCd = '#a88840'; // dark cream
+
+  // helper: gabled roof (ridge along X axis)
+  function roofGableX(rh, c1, c2) {
+    const ridge1 = [x0, h + rh, cz];
+    const ridge2 = [x1, h + rh, cz];
+    // front slope (toward z1)
+    poly([corners[7], corners[6], ridge2, ridge1], c1, '#0004');
+    // back slope (toward z0)
+    poly([corners[4], corners[5], ridge2, ridge1], c2, '#0004');
+    // gable ends
+    poly([corners[7], ridge1, corners[4]], c1, '#0003');
+    poly([corners[6], ridge2, corners[5]], c2, '#0003');
+  }
+
+  // helper: gabled roof (ridge along Z axis)
+  function roofGableZ(rh, c1, c2) {
+    const ridge1 = [cx, h + rh, z0];
+    const ridge2 = [cx, h + rh, z1];
+    // left slope (toward x0)
+    poly([corners[4], corners[7], ridge2, ridge1], c1, '#0004');
+    // right slope (toward x1)
+    poly([corners[5], corners[6], ridge2, ridge1], c2, '#0004');
+    // gable ends
+    poly([corners[4], ridge1, corners[5]], c1, '#0003');
+    poly([corners[7], ridge2, corners[6]], c2, '#0003');
+  }
+
+  // helper: hip roof (4 slopes meet at flat ridge along X)
+  function roofHipX(rh, c1, c2, c3) {
+    const inset = Math.min(depth * 0.35, width * 0.25);
+    const r1 = [x0 + inset, h + rh, cz];
+    const r2 = [x1 - inset, h + rh, cz];
+    // front slope
+    poly([corners[7], corners[6], r2, r1], c1, '#0004');
+    // back slope
+    poly([corners[4], corners[5], r2, r1], c1, '#0004');
+    // left hip
+    poly([corners[4], corners[7], r1], c2, '#0003');
+    // right hip
+    poly([corners[5], corners[6], r2], c3, '#0003');
+    // ridge top
+    poly([r1, r2, r2, r1], c2, null);
+  }
+
+  // helper: flat roof with parapet border
+  function roofFlat(c1, c2) {
+    poly([corners[4], corners[5], corners[6], corners[7]], c1, c2);
+    // parapet lines
+    const pw = 0.8;
+    ctx.save();
+    ctx.strokeStyle = c2;
+    ctx.lineWidth = 1.5;
+    const pts = [corners[4], corners[5], corners[6], corners[7], corners[4]];
+    ctx.beginPath();
+    const [px0, py0] = project(pts[0]); ctx.moveTo(px0, py0);
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = project(pts[i]); ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── assign roof style per building ───────────────────────
+  if (h < 3) {
+    // canchas: flat green
+    poly([corners[4], corners[5], corners[6], corners[7]], topColor, '#0004');
+  }
+  else if (id === 'admin') {
+    roofHipX(5, roofSl, roofSd, roofSd);
+  }
+  else if (id === 'enfermeria' || id === 'bano_admin') {
+    roofGableX(3.5, roofSl, roofSd);
+  }
+  else if (id === 'capilla') {
+    // steeper gable for chapel feel
+    roofGableZ(9, roofA, roofB);
+  }
+  else if (id === 'audit') {
+    roofHipX(4, roofSl, roofSd, roofSd);
+  }
+  else if (id === 'cafe') {
+    roofGableX(3.5, roofA, roofB);
+  }
+  else if (id === 'bib') {
+    roofFlat(roofCr, roofCd);
+  }
+  else if (id === 'lab') {
+    roofGableX(4, roofC, roofD);
+  }
+  else if (id === 'maestros' || id === 'bano_m') {
+    roofGableX(3, roofA, roofB);
+  }
+  else if (id === 'info') {
+    roofGableX(3.5, roofA, roofB);
+  }
+  else if (id === 'quiosco') {
+    // pyramid roof for quiosco
+    const peak = [cx, h + 4, cz];
+    poly([corners[4], corners[5], peak], roofA, '#0003');
+    poly([corners[5], corners[6], peak], roofB, '#0003');
+    poly([corners[6], corners[7], peak], roofA, '#0003');
+    poly([corners[7], corners[4], peak], roofB, '#0003');
+  }
+  else if (id && (id.startsWith('cls_') || id.startsWith('cls2_'))) {
+    roofGableX(3, roofA, roofB);
+  }
+  else if (id && id.startsWith('bano')) {
+    roofGableZ(2.5, roofSl, roofSd);
+  }
+  else {
+    roofFlat(topColor, '#0004');
+  }
+
+  if (h < 3) return; // skip windows/doors for flat surfaces
+
+  const winW   = Math.min(3.5, width  * 0.18);
+  const winH   = Math.min(3.0, h * 0.28);
+  const winY0  = h * 0.25;  // window bottom height
+  const winY1  = winY0 + winH;
+  const margin = 2.5;
+  const gap    = winW * 2.2;
+  const winColor = 'rgba(180,220,255,0.75)';
+  const winFrame = 'rgba(80,80,80,0.4)';
+
+  // helper: draw a window quad on a face defined by 4 3D corners (bl, br, tr, tl)
+  function drawWindow(bl, br, tr, tl) {
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    const pts = [bl, br, tr, tl];
+    const [px0, py0] = project(pts[0]);
+    ctx.moveTo(px0, py0);
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = project(pts[i]);
+      ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = winColor;
+    ctx.fill();
+    ctx.strokeStyle = winFrame;
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+    // cross divider
+    const [mx1, my1] = project([(bl[0]+br[0])/2, (bl[1]+br[1])/2, (bl[2]+br[2])/2]);
+    const [mx2, my2] = project([(tl[0]+tr[0])/2, (tl[1]+tr[1])/2, (tl[2]+tr[2])/2]);
+    const [my3x, my3y] = project([(bl[0]+tl[0])/2, (bl[1]+tl[1])/2, (bl[2]+tl[2])/2]);
+    const [my4x, my4y] = project([(br[0]+tr[0])/2, (br[1]+tr[1])/2, (br[2]+tr[2])/2]);
+    ctx.beginPath(); ctx.moveTo(mx1, my1); ctx.lineTo(mx2, my2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(my3x, my3y); ctx.lineTo(my4x, my4y); ctx.stroke();
+    ctx.restore();
+  }
+
+  // south face windows (z = z1, varies x)
+  if (depth > 4) {
+    const numW = Math.max(1, Math.floor((width - margin*2) / gap));
+    const totalW = (numW - 1) * gap;
+    const startX = x0 + (width - totalW) / 2;
+    for (let i = 0; i < numW; i++) {
+      const wx = startX + i * gap;
+      drawWindow(
+        [wx - winW/2, winY0, z1],
+        [wx + winW/2, winY0, z1],
+        [wx + winW/2, winY1, z1],
+        [wx - winW/2, winY1, z1]
+      );
+    }
+  }
+
+  // ── door decoration ───────────────────────────────────────
+  const doorW = Math.min(3.5, width * 0.22);
+  const doorH = Math.min(h * 0.55, 5.5);
+  const doorColor = '#7a5533';
+  const doorFrame = '#4a3020';
+  const doorKnob = '#d4a820';
+
+  function drawDoor(bl, br, tr, tl) {
+    ctx.save();
+    // door panel
+    ctx.beginPath();
+    const pts = [bl, br, tr, tl];
+    const [px0, py0] = project(pts[0]);
+    ctx.moveTo(px0, py0);
+    for (let i = 1; i < pts.length; i++) {
+      const [px, py] = project(pts[i]);
+      ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = doorColor;
+    ctx.globalAlpha = 0.92;
+    ctx.fill();
+    ctx.strokeStyle = doorFrame;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // door arch top
+    const [tx, ty] = project([(tl[0]+tr[0])/2, (tl[1]+tr[1])/2+1.2, (tl[2]+tr[2])/2]);
+    const [tlx, tly] = project(tl);
+    const [trx, try_] = project(tr);
+    ctx.beginPath();
+    ctx.moveTo(tlx, tly);
+    ctx.quadraticCurveTo(tx, ty, trx, try_);
+    ctx.strokeStyle = doorFrame;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // knob
+    const knobT = 0.42; // along bottom edge
+    const kx = bl[0] + (br[0]-bl[0])*(1-knobT);
+    const ky = bl[1] + (br[1]-bl[1])*(1-knobT) + doorH*0.45;
+    const kz = bl[2] + (br[2]-bl[2])*(1-knobT);
+    const [kpx, kpy] = project([kx, ky, kz]);
+    ctx.beginPath();
+    ctx.arc(kpx, kpy, 2.5, 0, Math.PI*2);
+    ctx.fillStyle = doorKnob;
+    ctx.globalAlpha = 1;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Place doors based on building id
+
+  // Aulas izquierdas → puerta en cara este (x1), centrada
+  if (id && id.startsWith('cls_')) {
+    drawDoor(
+      [x1, 0,   cz - doorW/2],
+      [x1, 0,   cz + doorW/2],
+      [x1, doorH, cz + doorW/2],
+      [x1, doorH, cz - doorW/2]
+    );
+  }
+  // Aulas derechas (1A-3B) → puerta en cara oeste (x0)
+  else if (id && id.startsWith('cls2_')) {
+    drawDoor(
+      [x0, 0,   cz - doorW/2],
+      [x0, 0,   cz + doorW/2],
+      [x0, doorH, cz + doorW/2],
+      [x0, doorH, cz - doorW/2]
+    );
+  }
+  // Administración → puerta en cara sur (z1), centrada
+  else if (id === 'admin') {
+    drawDoor(
+      [cx - doorW/2, 0,   z1],
+      [cx + doorW/2, 0,   z1],
+      [cx + doorW/2, doorH, z1],
+      [cx - doorW/2, doorH, z1]
+    );
+  }
+  // Biblioteca → puerta en cara norte (z0)
+  else if (id === 'bib') {
+    drawDoor(
+      [cx - doorW/2, 0,   z0],
+      [cx + doorW/2, 0,   z0],
+      [cx + doorW/2, doorH, z0],
+      [cx - doorW/2, doorH, z0]
+    );
+  }
+  // Laboratorio → puerta en cara este (x1)
+  else if (id === 'lab') {
+    drawDoor(
+      [x1, 0,   cz - doorW/2],
+      [x1, 0,   cz + doorW/2],
+      [x1, doorH, cz + doorW/2],
+      [x1, doorH, cz - doorW/2]
+    );
+  }
+  // Sala de maestros → puerta hacia enfermería (cara norte z0)
+  else if (id === 'maestros') {
+    drawDoor(
+      [cx - doorW/2, 0,   z0],
+      [cx + doorW/2, 0,   z0],
+      [cx + doorW/2, doorH, z0],
+      [cx - doorW/2, doorH, z0]
+    );
+  }
+  // Informática → puerta hacia enfermería (cara norte z0)
+  else if (id === 'info') {
+    drawDoor(
+      [cx - doorW/2, 0,   z0],
+      [cx + doorW/2, 0,   z0],
+      [cx + doorW/2, doorH, z0],
+      [cx - doorW/2, doorH, z0]
+    );
+  }
+  // Capilla → puerta en cara sur (z1), centrada
+  else if (id === 'capilla') {
+    drawDoor(
+      [cx - doorW/2, 0,   z1],
+      [cx + doorW/2, 0,   z1],
+      [cx + doorW/2, doorH, z1],
+      [cx - doorW/2, doorH, z1]
+    );
+  }
+  // Auditorio → puerta en cara sur (z1)
+  else if (id === 'audit') {
+    drawDoor(
+      [cx - doorW*0.6, 0,   z1],
+      [cx + doorW*0.6, 0,   z1],
+      [cx + doorW*0.6, doorH, z1],
+      [cx - doorW*0.6, doorH, z1]
+    );
+  }
+  // Cafetería → puerta en cara sur (z1)
+  else if (id === 'cafe') {
+    drawDoor(
+      [cx - doorW/2, 0,   z1],
+      [cx + doorW/2, 0,   z1],
+      [cx + doorW/2, doorH, z1],
+      [cx - doorW/2, doorH, z1]
+    );
+  }
+  // Quiosco → puerta en cara oeste (x0)
+  else if (id === 'quiosco') {
+    drawDoor(
+      [x0, 0,   cz - doorW/2],
+      [x0, 0,   cz + doorW/2],
+      [x0, doorH, cz + doorW/2],
+      [x0, doorH, cz - doorW/2]
+    );
+  }
+  // Enfermería → puerta en cara sur (z1)
+  else if (id === 'enfermeria') {
+    drawDoor(
+      [cx - doorW/2, 0,   z1],
+      [cx + doorW/2, 0,   z1],
+      [cx + doorW/2, doorH, z1],
+      [cx - doorW/2, doorH, z1]
+    );
+  }
+}
+
+// label at 3d point
+function label3d(x, y, z, text, size=10, color='#fff') {
+  const [px, py] = project([x, y, z]);
+  ctx.save();
+  ctx.font = `${size}px Sora, sans-serif`;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // subtle shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, px, py);
+  ctx.restore();
+}
+
+// ── campus layout ─────────────────────────────────────────
+// coordinate system: X = left-right, Z = top-bottom (isometric)
+// campus approx 200 × 160 units. origin at centre.
+
+const BUILDINGS = [];
+
+function addB(id, name, x0, z0, x1, z1, h, top, sw, se, desc='') {
+  BUILDINGS.push({ id, name, x0, z0, x1, z1, h, top, sw, se, desc });
+}
+
+// ── ground ────────────────────────────────────────────────
+const GW = 310, GD = 220;
+
+// ── green areas (flat polygons at y=0.1) ─────────────────
+const GREENS = [
+  // patio central
+  { pts: [[-60,-50],[45,-50],[45,55],[-60,55]], color:'#4a9050' },
+  // franja verde exterior izquierda
+  { pts: [[-155,-50],[-105,-50],[-105,55],[-155,55]], color:'#4a9050' },
+  // franja verde superior (entre admin y capilla)
+  { pts: [[-10,-102],[45,-102],[45,-88],[-10,-88]], color:'#5aaa60' },
+  // zona verde derecha (entre capilla y borde)
+  { pts: [[45,-45],[115,-45],[115,55],[45,55]], color:'#4a9050' },
+  // franja verde extremo derecho junto al quiosco/banos
+  { pts: [[115,-45],[155,-45],[155,0],[115,0]], color:'#52a058' },
+  // verde entre canchas y quiosco area
+  { pts: [[115,0],[155,0],[155,55],[115,55]], color:'#3a8a40' },
+  // área verde esquina inferior izquierda (morado)
+  { pts: [[-155,55],[-105,55],[-105,110],[-155,110]], color:'#4a9050' },
+];
+
+// ── ADMINISTRATION block ───────────────────────────────────
+addB('admin','Administración',  -105,-102,  -10,-77,  14, '#c8ba88','#b0a070','#a89060','Edificio principal de administración');
+addB('bano_admin','Baño',         -10,-102,    2,-87,   8, '#d0c898','#b8b080','#a8a070','Baño administrativo');
+addB('enfermeria','Enfermería',   -40,-87,  -10,-72,   8, '#c8c0a0','#b0aa88','#a09878','Enfermería escolar');
+
+// ── ENTRANCE gap marker (no building, just opening) ───────
+
+// ── CLASSROOMS left wing (9A-4A) ─────────────────────────
+const CW=22, CH=10, CG=2;
+const clsLeft = ['9B','9A','8B','8A','7B','7A','6B','6A','5B','5A','4B','4A'];
+clsLeft.forEach((nm,i) => {
+  const z = -34 + i*(CH+CG);
+  addB('cls_'+nm, 'Aula '+nm, -105, z, -83, z+CH, 9, '#d4c8a8','#c0b090','#b0a080', 'Aula de clase '+nm);
+});
+
+// ── CLASSROOMS right sub-wing (3B-1A) ────────────────────
+const clsRight = ['3B','3A','2B','2A','1B','1A'];
+clsRight.forEach((nm,i) => {
+  const z = 38 + i*(CH+CG);
+  addB('cls2_'+nm, 'Aula '+nm, -60, z, -38, z+CH, 9, '#d4c8a8','#c0b090','#b0a080', 'Aula de clase '+nm);
+});
+
+// ── LABORATORIO ───────────────────────────────────────────
+addB('lab','Laboratorio', -60,-24, -38, 36, 10, '#e8c878','#d4b460','#c0a050','Laboratorio de ciencias');
+
+// ── SALA DE MAESTROS ──────────────────────────────────────
+addB('maestros','Sala de Maestros', -37,-57, -15,-40, 9, '#d8c890','#c4b478','#b0a068','Sala de reuniones docentes');
+addB('bano_m','Baño', -15,-57, -5,-47, 7, '#ccc898','#b8b480','#a8a470','Baño sala maestros');
+
+// ── SALON INFORMATICA ─────────────────────────────────────
+addB('info','Salón de Informática', -5,-57, 30,-40, 9, '#e8d878','#d4c464','#c0b050','Laboratorio de computación');
+
+// ── BIBLIOTECA (standalone) ───────────────────────────────
+addB('bib','Biblioteca', 5,-20, 45, 15, 12, '#7ec8e3','#60b0cc','#50a0bc','Biblioteca escolar');
+
+// ── CAPILLA ───────────────────────────────────────────────
+addB('capilla','Capilla', 45,-102, 80,-77, 14, '#e07070','#cc5858','#b84848','Capilla del campus');
+
+// ── AUDITORIO ─────────────────────────────────────────────
+addB('audit','Auditorio', 80,-102, 115,-77, 12, '#a0c8f0','#88b0d8','#7098c0','Auditorio escolar');
+
+// ── CAFETERÍA ─────────────────────────────────────────────
+addB('cafe','Cafetería', 115,-102, 150,-77, 10, '#f0b070','#d89858','#c08848','Cafetería');
+
+// ── QUIOSCO ───────────────────────────────────────────────
+addB('quiosco','Quiosco', 115,-77, 150,-60, 6, '#f0c870','#d8b058','#c0a048','Quiosco / tienda estudiantil');
+
+// ── BANOS derecha (en columna bajo el quiosco) ────────────
+addB('bano_d1','Baño niños', 115,-60, 150,-47, 6, '#d0e8f0','#b8d0d8','#a0c0c8','');
+addB('bano_d2','Baño niñas', 115,-47, 150,-34, 6, '#f0d0e8','#d8b8d0','#c0a0b8','');
+
+// ── CANCHAS ───────────────────────────────────────────────
+addB('basket','Cancha de Baloncesto', 30, 55, 75, 105, 1, '#4a7a4a','#3a6a3a','#3a6a3a','Cancha de baloncesto');
+addB('futbol','Cancha de Fútbol',    75, 55, 155, 108, 1, '#3a8a3a','#2a7a2a','#2a7a2a','Cancha de fútbol');
+
+// ── BAÑOS izquierda (niños/niñas) en columna ──────────────
+addB('bano_iz1','Baño niños', -105,-46, -90,-40, 6, '#d0e8f0','#b8d0d8','#a0c0c8','');
+addB('bano_iz2','Baño niñas', -105,-40, -90,-34, 6, '#f0d0e8','#d8b8d0','#c0a0b8','');
+
+// ── trees (cylinders approximated as circles) ─────────────
+const TREES = [
+  [50,-35],[90,-15],
+  [100,15],[75,25],[35,35],[15,45],[-5,35],[-30,30],
+  // área verde izquierda
+  [-120,-40],[-135,-20],[-125,5],[-140,25],[-120,45],[-135,65],
+];
+
+// ── sort for painter's algo ────────────────────────────────
+function sortBuildings() {
+  return [...BUILDINGS].sort((a,b) => {
+    const da = (a.x0+a.x1)/2 * Math.sin(cam.rotY) + (a.z0+a.z1)/2 * Math.cos(cam.rotY);
+    const db = (b.x0+b.x1)/2 * Math.sin(cam.rotY) + (b.z0+b.z1)/2 * Math.cos(cam.rotY);
+    return da - db;
+  });
+}
+
+// ── draw tree ─────────────────────────────────────────────
+function drawTree(tx, tz) {
+  // trunk
+  const [bx, by] = project([tx, 0, tz]);
+  const [tx2, ty2] = project([tx, 4, tz]);
+  ctx.save();
+  ctx.strokeStyle = '#7a5c3a';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(bx, by);
+  ctx.lineTo(tx2, ty2);
+  ctx.stroke();
+  // canopy – project a circle at top
+  const [cx, cy] = project([tx, 7, tz]);
+  const [ex, ey] = project([tx+4, 7, tz]);
+  const r = Math.hypot(ex-cx, ey-cy);
+  const grad = ctx.createRadialGradient(cx, cy-r*0.3, r*0.1, cx, cy, r);
+  grad.addColorStop(0, '#7ed880');
+  grad.addColorStop(0.6, '#4a9850');
+  grad.addColorStop(1, '#2a6830');
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── draw court markings ───────────────────────────────────
+function drawCourtMarkings() {
+  // basketball - centre circle
+  const [cx, cy] = project([52, 1.1, 80]);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 12, 0, Math.PI*2);
+  ctx.stroke();
+  // football lines
+  ctx.lineWidth = 1;
+  const pts = [[76,56],[76,107],[154,107],[154,56],[76,56]];
+  ctx.beginPath();
+  let [px, py] = project([pts[0][0], 1.1, pts[0][1]]);
+  ctx.moveTo(px, py);
+  for (let i=1;i<pts.length;i++) {
+    const [qx, qy] = project([pts[i][0], 1.1, pts[i][1]]);
+    ctx.lineTo(qx, qy);
+  }
+  ctx.stroke();
+  // midline
+  const [m1x, m1y] = project([115, 1.1, 56]);
+  const [m2x, m2y] = project([115, 1.1, 107]);
+  ctx.beginPath(); ctx.moveTo(m1x, m1y); ctx.lineTo(m2x, m2y); ctx.stroke();
+  ctx.restore();
+}
+
+// ── chapel spire ──────────────────────────────────────────
+function drawSpire() {
+  const base = project([62.5, 14, -90]);
+  const tip  = project([62.5, 28, -90]);
+  ctx.save();
+  ctx.strokeStyle = '#c04040';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(base[0], base[1]);
+  ctx.lineTo(tip[0], tip[1]);
+  ctx.stroke();
+  // cross
+  const arm = project([60, 25, -90]);
+  const arm2 = project([65, 25, -90]);
+  ctx.beginPath();
+  ctx.moveTo(arm[0], arm[1]);
+  ctx.lineTo(arm2[0], arm2[1]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── draw all ──────────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // background gradient
+  const bg = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 50, canvas.width/2, canvas.height/2, canvas.width*0.7);
+  bg.addColorStop(0, '#1e2a40');
+  bg.addColorStop(1, '#0d0d1a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // ground
+  poly([
+    [-GW/2, 0, -GD/2], [GW/2, 0, -GD/2],
+    [GW/2, 0, GD/2],  [-GW/2, 0, GD/2]
+  ], '#d8cfb8', '#b0a888');
+
+  // ── perimeter walls ───────────────────────────────────────
+  const WX0 = -GW/2, WX1 = GW/2;
+  const WZ0 = -GD/2, WZ1 = GD/2;
+  const WT  = 3;    // wall thickness
+  const WH  = 7;    // wall height
+  const wTop  = '#c8b898';
+  const wSideA = '#b8a888';
+  const wSideB = '#a89878';
+
+  // north wall (z = WZ0)
+  box(WX0, WZ0, WX1, WZ0 + WT, WH, wTop, wSideA, wSideB, '__wall_n');
+  // south wall (z = WZ1)
+  box(WX0, WZ1 - WT, WX1, WZ1, WH, wTop, wSideA, wSideB, '__wall_s');
+  // west wall with entrance gap
+  // upper segment (above gap)
+  box(WX0, WZ0,       WX0 + WT, -102, WH, wTop, wSideA, wSideB, '__wall_w1');
+  // lower segment (below gap)
+  box(WX0, -82,       WX0 + WT, WZ1,  WH, wTop, wSideA, wSideB, '__wall_w2');
+  // gate pillars
+  box(WX0, -105, WX0 + WT + 2, -102, WH + 3, '#c8b890', '#b0a078','#a09068', '__gate_p1');
+  box(WX0, -82,  WX0 + WT + 2, -79,  WH + 3, '#c8b890', '#b0a078','#a09068', '__gate_p2');
+  // east wall (x = WX1)
+  box(WX1 - WT, WZ0, WX1, WZ1, WH, wTop, wSideA, wSideB, '__wall_e');
+
+  // ── gate arch & entrance sign ─────────────────────────────
+  {
+    const gateZ  = -92; // centre of opening
+    const gateX  = WX0 + WT + 1;
+    const archH  = WH + 5;
+    // arch bar across the top
+    const [a1x, a1y] = project([WX0, archH, -105]);
+    const [a2x, a2y] = project([WX0, archH, -79]);
+    const [a3x, a3y] = project([gateX + 1, archH, -79]);
+    const [a4x, a4y] = project([gateX + 1, archH, -105]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(a1x, a1y); ctx.lineTo(a2x, a2y);
+    ctx.lineTo(a3x, a3y); ctx.lineTo(a4x, a4y);
+    ctx.closePath();
+    ctx.fillStyle = '#c8b890';
+    ctx.fill();
+    ctx.strokeStyle = '#907850';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // "ENTRADA" text on the arch
+    const [tx, ty] = project([WX0 - 0.5, archH + 1.5, gateZ]);
+    ctx.font = 'bold 11px Sora, sans-serif';
+    ctx.fillStyle = '#5a3a10';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(255,255,200,0.6)';
+    ctx.shadowBlur = 4;
+    ctx.fillText('ENTRADA', tx, ty);
+
+    // iron gate bars (vertical lines across opening)
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 5; i++) {
+      const bz = -102 + (20 / 4) * i;
+      const [bx1, by1] = project([WX0 + 1, 0,   bz]);
+      const [bx2, by2] = project([WX0 + 1, WH,  bz]);
+      ctx.beginPath(); ctx.moveTo(bx1, by1); ctx.lineTo(bx2, by2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  GREENS.forEach(g => {
+    const pts3 = g.pts.map(([x,z]) => [x, 0.2, z]);
+    poly(pts3, g.color, '#3a7a40', 0.9);
+  });
+
+  // ── camino horizontal (pasillo central) ──────────────────
+  // tramo izquierdo: desde aulas hasta laboratorio
+  poly([[-83,0.3,-57],[-60,0.3,-57],[-60,0.3,-47],[-83,0.3,-47]], '#cfc4a0', null, 0.95);
+  // tramo derecho: desde laboratorio/aulas derechas hasta capilla
+  poly([[-38,0.3,-57],[45,0.3,-57],[45,0.3,-47],[-38,0.3,-47]], '#cfc4a0', null, 0.95);
+
+  // ── camino pavimentado biblioteca (entre informática y bib) ──
+  // pasillo vertical entre informática (z=-40) y biblioteca (z=-20)
+  poly([[0,0.3,-40],[30,0.3,-40],[30,0.3,-20],[0,0.3,-20]], '#b8ac8a', null, 0.95);
+  // pequeño camino de entrada a biblioteca desde el norte
+  poly([[15,0.3,-22],[25,0.3,-22],[25,0.3,-20],[15,0.3,-20]], '#c8bc9a', null, 1);
+  // camino horizontal desde informática hacia la derecha hasta capilla
+  poly([[30,0.3,-47],[45,0.3,-47],[45,0.3,-40],[30,0.3,-40]], '#b8ac8a', null, 0.95);
+
+  // ── camino de entrada principal (esquina sup-izq) ─────────
+  poly([[-155,0.3,-102],[-105,0.3,-102],[-105,0.3,-88],[-155,0.3,-88]], '#cfc4a0', null, 0.9);
+
+  // buildings (sorted)
+  const sorted = sortBuildings();
+  sorted.forEach(b => {
+    const hl = highlightId === b.id;
+    cam.highlightId = highlightId;
+    box(b.x0, b.z0, b.x1, b.z1, b.h, b.top, b.sw, b.se, b.id);
+  });
+
+  // court markings
+  drawCourtMarkings();
+
+  // trees (behind buildings, simple approach: draw after)
+  TREES.forEach(([tx, tz]) => drawTree(tx, tz));
+
+  // chapel spire
+  drawSpire();
+
+  // labels
+  const lbls = [
+    { id:'admin', x:-57, y:16, z:-89, t:'Administración', s:11 },
+    { id:'enfermeria', x:-25, y:10, z:-79, t:'Enfermería', s:9 },
+    { id:'maestros', x:-26, y:11, z:-48, t:'Sala Maestros', s:9 },
+    { id:'info', x:12, y:11, z:-48, t:'Informática', s:9 },
+    { id:'bib', x:25, y:15, z:-2, t:'Biblioteca', s:11 },
+    { id:'lab', x:-49, y:13, z:6, t:'Laboratorio', s:9 },
+    { id:'capilla', x:62, y:17, z:-89, t:'Capilla', s:10 },
+    { id:'audit', x:97, y:15, z:-89, t:'Auditorio', s:10 },
+    { id:'cafe', x:132, y:13, z:-89, t:'Cafetería', s:9 },
+    { id:'quiosco', x:132, y:9, z:-68, t:'Quiosco', s:9 },
+    { id:'basket', x:52, y:4, z:80, t:'Cancha Baloncesto', s:9 },
+    { id:'futbol', x:115, y:4, z:81, t:'Cancha Fútbol', s:9 },
+  ];
+  // aula labels left
+  clsLeft.forEach((nm,i) => {
+    const z = -34 + i*(CH+CG) + CH/2;
+    lbls.push({ id:'cls_'+nm, x:-94, y:11, z, t:nm, s:8 });
+  });
+  clsRight.forEach((nm,i) => {
+    const z = 38 + i*(CH+CG) + CH/2;
+    lbls.push({ id:'cls2_'+nm, x:-49, y:11, z, t:nm, s:8 });
+  });
+
+  lbls.forEach(l => {
+    const alpha = highlightId === l.id ? 1 : 0.9;
+    const sz = highlightId === l.id ? l.s+2 : l.s;
+    label3d(l.x, l.y, l.z, l.t, sz, highlightId===l.id ? '#ffee88' : '#fff');
+  });
+}
+
+// ── interaction ───────────────────────────────────────────
+canvas.addEventListener('mousedown', e => {
+  drag.active = true;
+  drag.sx = e.clientX; drag.sy = e.clientY;
+  drag.rx0 = cam.rotX; drag.ry0 = cam.rotY;
+});
+canvas.addEventListener('mousemove', e => {
+  if (drag.active) {
+    cam.rotY = drag.ry0 + (e.clientX - drag.sx) * 0.008;
+    cam.rotX = Math.max(0.1, Math.min(1.3, drag.rx0 - (e.clientY - drag.sy) * 0.007));
+    draw();
+  }
+  // hit test for tooltip
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let found = null;
+  for (const b of BUILDINGS) {
+    if (!b.name) continue;
+    if (!b.name || b.id.startsWith('__wall')) continue;
+    const cx = (b.x0+b.x1)/2, cz = (b.z0+b.z1)/2;
+    const [px, py] = project([cx, b.h/2, cz]);
+    if (Math.hypot(px-mx, py-my) < 28) { found = b; break; }
+  }
+  if (found) {
+    highlightId = found.id;
+    tooltip.innerHTML = `<strong>${found.name}</strong>${found.desc ? found.desc : ''}`;
+    tooltip.style.left = (e.clientX+14)+'px';
+    tooltip.style.top  = (e.clientY-10)+'px';
+    tooltip.classList.add('show');
+    draw();
+  } else {
+    if (highlightId) { highlightId = null; draw(); }
+    tooltip.classList.remove('show');
+  }
+});
+window.addEventListener('mouseup', () => { drag.active = false; });
+canvas.addEventListener('wheel', e => {
+  cam.zoom = Math.max(0.35, Math.min(3.0, cam.zoom - e.deltaY * 0.001));
+  draw();
+}, { passive: true });
+
+// touch
+let lastTouchDist = 0;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    drag.active = true;
+    drag.sx = e.touches[0].clientX; drag.sy = e.touches[0].clientY;
+    drag.rx0 = cam.rotX; drag.ry0 = cam.rotY;
+  } else if (e.touches.length === 2) {
+    lastTouchDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 1 && drag.active) {
+    cam.rotY = drag.ry0 + (e.touches[0].clientX - drag.sx) * 0.01;
+    cam.rotX = Math.max(0.1, Math.min(1.3, drag.rx0 - (e.touches[0].clientY - drag.sy) * 0.009));
+    draw();
+  } else if (e.touches.length === 2) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    cam.zoom = Math.max(0.35, Math.min(3, cam.zoom * (d / lastTouchDist)));
+    lastTouchDist = d;
+    draw();
+  }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { drag.active = false; });
+
+// ── control buttons ──────────────────────────────────────
+function resetView() {
+  cam = { rotX: 0.55, rotY: 0.62, zoom: 1.0, ortho: false };
+  draw();
+}
+function toggleOrtho() {
+  cam.ortho = !cam.ortho;
+  if (cam.ortho) { cam.rotX = Math.PI/2 * 0.95; cam.rotY = 0; cam.zoom = 0.85; }
+  else { cam.rotX = 0.55; cam.rotY = 0.62; }
+  draw();
+}
+function rotateCW() {
+  cam.rotY += Math.PI/8; draw();
+}
+
+// ── init ──────────────────────────────────────────────────
+draw();
+</script>
+</body>
+</html>
